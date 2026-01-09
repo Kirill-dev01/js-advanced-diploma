@@ -177,11 +177,13 @@ export default class GamePlay {
     this.loadGameListeners.forEach(o => o.call(null));
   }
 
-  static showError(message) {
+  // Исправлено: убран static
+  showError(message) {
     alert(message);
   }
 
-  static showMessage(message) {
+  // Исправлено: убран static
+  showMessage(message) {
     alert(message);
   }
 
@@ -203,7 +205,7 @@ export default class GamePlay {
   hideCellTooltip(index) {
     this.cells[index].title = '';
   }
-  
+
   showDamage(index, damage) {
     return new Promise((resolve) => {
       const cell = this.cells[index];
