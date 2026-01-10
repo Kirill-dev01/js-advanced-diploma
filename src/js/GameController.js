@@ -22,7 +22,7 @@ export default class GameController {
     this.score = 0;
     this.themes = [themes.prairie, themes.desert, themes.arctic, themes.mountain];
 
-    // Новое свойство для хранения подсвеченных клеток (ореол)
+    // Новое свойство для хранения подсвеченных клеток
     this.highlightedCells = [];
   }
 
@@ -328,8 +328,6 @@ export default class GameController {
           this.gamePlay.showError('Слишком далеко для хода!');
         }
       } else {
-        // ОШИБКА: Клик в пустоту без персонажа (ДОБАВЛЕНО, если хотите реакцию)
-        // this.gamePlay.showError('Выберите персонажа для хода'); // Раскомментируйте, если нужно
       }
     }
   }
@@ -341,8 +339,6 @@ export default class GameController {
       this.gamePlay.showCellTooltip(message, index);
     }
 
-    // Курсоры оставляем, но выделение (selectCell) в Enter убираем,
-    // чтобы не портить "Ореол", который мы нарисовали в onCellClick
     if (this.selectedIndex !== null) {
       const selectedChar = this.positions.find(i => i.position === this.selectedIndex);
       if (index === this.selectedIndex) return;
@@ -353,8 +349,6 @@ export default class GameController {
         } else {
           if (this.canAttack(selectedChar, index)) {
             this.gamePlay.setCursor(cursors.crosshair);
-            // Убрали selectCell('red') отсюда, так как оно уже есть в ореоле
-            // Но курсор прицела оставляем
           } else {
             this.gamePlay.setCursor(cursors.notallowed);
           }
@@ -362,7 +356,6 @@ export default class GameController {
       } else {
         if (this.canMove(selectedChar, index)) {
           this.gamePlay.setCursor(cursors.pointer);
-          // Убрали selectCell('green') отсюда, оно есть в ореоле
         } else {
           this.gamePlay.setCursor(cursors.notallowed);
         }
@@ -373,7 +366,6 @@ export default class GameController {
   onCellLeave(index) {
     this.gamePlay.hideCellTooltip(index);
     this.gamePlay.setCursor(cursors.auto);
-    // Убираем логику deselectCell отсюда, так как очисткой теперь управляет clearHighlights
   }
 
   onSaveGameClick() {
