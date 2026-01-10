@@ -18,16 +18,41 @@ export default class GameController {
     this.stateService = stateService;
     this.gameState = new GameState();
     this.selectedIndex = null;
-    this.level = 1; // Текущий уровень
-    this.score = 0; // Очки
+    this.level = 1;
+    this.score = 0;
     this.themes = [themes.prairie, themes.desert, themes.arctic, themes.mountain];
+
+    // Новое свойство для хранения подсвеченных клеток (ореол)
+    this.highlightedCells = [];
   }
 
   init() {
-    // При старте запускаем новую игру
+    // 1. Настраиваем красивые уведомления вместо alert
+    this.gamePlay.showError = (message) => {
+      const errorEl = document.createElement('div');
+      errorEl.textContent = message;
+      errorEl.className = 'modal-message';
+      errorEl.style.borderColor = 'red';
+      document.body.appendChild(errorEl);
+      setTimeout(() => errorEl.remove(), 3000);
+    };
+
+    this.gamePlay.showMessage = (message) => {
+      const msgEl = document.createElement('div');
+      msgEl.textContent = message;
+      msgEl.className = 'modal-message';
+      document.body.appendChild(msgEl);
+      setTimeout(() => msgEl.remove(), 3000);
+    };
+
+    // 2. Загружаем рекорд
+    const maxScore = localStorage.getItem('maxScore');
+    this.maxScore = maxScore ? Number(maxScore) : 0;
+    console.log('Current Max Score:', this.maxScore);
+
+    // 3. Запускаем игру и вешаем слушатели
     this.newGame();
 
-    // Подписки на события
     this.gamePlay.addCellEnterListener(this.onCellEnter.bind(this));
     this.gamePlay.addCellLeaveListener(this.onCellLeave.bind(this));
     this.gamePlay.addCellClickListener(this.onCellClick.bind(this));
@@ -36,13 +61,66 @@ export default class GameController {
     this.gamePlay.addLoadGameListener(this.onLoadGameClick.bind(this));
   }
 
+  // --- ЛОГИКА РЕКОРДОВ ---
+  checkHighScore() {
+    if (this.score > this.maxScore) {
+      this.maxScore = this.score;
+      localStorage.setItem('maxScore', this.maxScore);
+      this.gamePlay.showMessage(`Новый рекорд: ${this.maxScore}!`);
+    }
+  }
+
+  // --- ЛОГИКА ПОДСВЕТКИ (ОРЕОЛ) ---
+  clearHighlights() {
+    this.highlightedCells.forEach(index => this.gamePlay.deselectCell(index));
+    this.highlightedCells = [];
+  }
+
+  highlightPossibleMoves(char) {
+    this.clearHighlights(); // Сначала очищаем старое
+
+    for (let i = 0; i < this.gamePlay.boardSize ** 2; i++) {
+      if (i === char.position) continue; // Самого себя не подсвечиваем
+
+      // 1. Атака (приоритет) - подсвечиваем только если там ВРАГ
+      if (this.canAttack(char, i)) {
+        const enemy = this.positions.find(p => p.position === i);
+        // Если там враг (не наш)
+        if (enemy && !['bowman', 'swordsman', 'magician'].includes(enemy.character.type)) {
+          this.gamePlay.selectCell(i, 'red');
+          this.highlightedCells.push(i);
+          continue;
+        }
+      }
+
+      // 2. Движение - подсвечиваем только пустые клетки
+      const isOccupied = this.positions.some(p => p.position === i);
+      if (!isOccupied && this.canMove(char, i)) {
+        this.gamePlay.selectCell(i, 'green');
+        this.highlightedCells.push(i);
+      }
+    }
+  }
+
   newGame() {
+    // 1. Проверяем рекорд перед сбросом
+    this.checkHighScore();
+
+    // 2. Если мы уже играли (счет > 0), показываем результат перед сбросом
+    if (this.score > 0) {
+      this.gamePlay.showMessage(`Новая игра! Прошлый счет: ${this.score}. Рекорд: ${this.maxScore}`);
+      console.log(`Game Over. Score: ${this.score}. Max Score: ${this.maxScore}`);
+    } else {
+      console.log('Starting new game. Max Score:', this.maxScore);
+    }
+
+    // 3. Сбрасываем параметры для новой игры
     this.level = 1;
     this.score = 0;
     this.gameState.turn = 'player';
     this.selectedIndex = null;
+    this.highlightedCells = [];
 
-    // Создаем стартовую команду игрока
     const playerTypes = [Bowman, Swordsman, Magician];
     const enemyTypes = [Vampire, Undead, Daemon];
 
@@ -53,23 +131,20 @@ export default class GameController {
   }
 
   initLevel() {
-    this.gameState.turn = 'player'; // <-- Гарантируем, что ход игрока
-    this.selectedIndex = null;      // <-- ВАЖНО: Сбрасываем выделение при смене уровня
+    this.gameState.turn = 'player';
+    this.selectedIndex = null;
+    this.clearHighlights(); // Очистка подсветки при смене уровня
 
-    // 1. Выбираем тему уровня
     const theme = this.themes[(this.level - 1) % 4];
     this.gamePlay.drawUi(theme);
 
-    // 2. Расставляем персонажей
     const positionedCharacters = [];
 
-    // Игрок (слева)
     const playerPositions = this.getStartPosition(this.playerTeam.characters.length, 'player');
     this.playerTeam.characters.forEach((character, i) => {
       positionedCharacters.push(new PositionedCharacter(character, playerPositions[i]));
     });
 
-    // Враг (справа)
     const enemyPositions = this.getStartPosition(this.enemyTeam.characters.length, 'enemy');
     this.enemyTeam.characters.forEach((character, i) => {
       positionedCharacters.push(new PositionedCharacter(character, enemyPositions[i]));
@@ -80,9 +155,11 @@ export default class GameController {
   }
 
   levelUp() {
+    this.score += 100; // Очки за прохождение уровня
+    this.checkHighScore(); // Проверяем рекорд
+
     this.level += 1;
 
-    // 1. Повышаем уровень выживших героев игрока
     this.playerTeam.characters.forEach(char => {
       char.level += 1;
       char.attack = Math.max(char.attack, char.attack * (80 + char.health) / 100);
@@ -90,18 +167,6 @@ export default class GameController {
       char.health = Math.min(char.health + 80, 100);
     });
 
-    // 2. ДОБАВЛЯЕМ НОВЫХ ПОМОЩНИКОВ 
-    // Генерируем 1 или 2 новых героев (зависит от сложности, добавим 1)
-    // Уровень новых героев = текущий уровень - 1 (чтобы не были совсем слабыми)
-    // generateTeam возвращает объект Team, нам нужен массив .characters
-    const playerTypes = [Bowman, Swordsman, Magician];
-    const newHelpers = generateTeam(playerTypes, this.level - 1 || 1, 1);
-
-    newHelpers.characters.forEach(char => {
-      this.playerTeam.characters.push(char);
-    });
-
-    // 3. Создаем новых врагов
     const enemyTypes = [Vampire, Undead, Daemon];
     this.enemyTeam = generateTeam(enemyTypes, this.level + 1, this.playerTeam.characters.length + 1);
 
@@ -116,34 +181,38 @@ export default class GameController {
     target.character.health -= damage;
 
     if (target.character.health <= 0) {
-      // Убираем убитого из массива позиций
+      // 1. Начисляем очки за убийство
+      this.score += 10;
+
+      // 2. Удаляем персонажа с поля
       this.positions = this.positions.filter(item => item.position !== index);
 
-      // Обновляем команды 
+      // 3. Удаляем из команды
       if (['bowman', 'swordsman', 'magician'].includes(target.character.type)) {
         this.playerTeam.characters = this.playerTeam.characters.filter(c => c !== target.character);
       } else {
         this.enemyTeam.characters = this.enemyTeam.characters.filter(c => c !== target.character);
       }
 
-      // ПРОВЕРКА ПОБЕДЫ ИЛИ ПОРАЖЕНИЯ
+      // 4. Проверяем победу или поражение
       if (this.enemyTeam.characters.length === 0) {
         this.levelUp();
         return;
       }
 
       if (this.playerTeam.characters.length === 0) {
-        this.gamePlay.showMessage('Game Over!');
-
+        this.checkHighScore(); // Проверка рекорда при проигрыше
+        this.gamePlay.showMessage(`Game Over! Ваш счет: ${this.score}. Рекорд: ${this.maxScore}`);
         return;
       }
     }
 
     this.gamePlay.redrawPositions(this.positions);
 
-    // Смена хода
+    // 5. Переход хода
     if (this.gameState.turn === 'player') {
       this.gameState.turn = 'computer';
+      this.clearHighlights(); // Убираем подсветку перед ходом компа
       this.gamePlay.deselectCell(this.selectedIndex);
       this.selectedIndex = null;
       this.enemyAction();
@@ -160,7 +229,6 @@ export default class GameController {
 
     if (enemyTeamPos.length === 0 || playerTeamPos.length === 0) return;
 
-    // 1. Атака
     for (const enemy of enemyTeamPos) {
       const target = playerTeamPos.find(hero => this.canAttack(enemy, hero.position));
       if (target) {
@@ -169,7 +237,6 @@ export default class GameController {
       }
     }
 
-    // 2. Движение
     const randomIndex = Math.floor(Math.random() * enemyTeamPos.length);
     const enemy = enemyTeamPos[randomIndex];
 
@@ -209,6 +276,144 @@ export default class GameController {
     }
   }
 
+  onCellClick(index) {
+    if (this.gameState.turn === 'computer') return;
+    const found = this.positions.find(item => item.position === index);
+
+    if (found) {
+      if (['bowman', 'swordsman', 'magician'].includes(found.character.type)) {
+        // КЛИК ПО СВОЕМУ
+        if (this.selectedIndex !== null) {
+          this.gamePlay.deselectCell(this.selectedIndex);
+          this.clearHighlights();
+        }
+
+        this.gamePlay.selectCell(index);
+        this.selectedIndex = index;
+
+        const selectedChar = this.positions.find(item => item.position === this.selectedIndex);
+        this.highlightPossibleMoves(selectedChar);
+
+      } else {
+        // КЛИК ПО ВРАГУ
+        if (this.selectedIndex !== null) {
+          const selectedChar = this.positions.find(item => item.position === this.selectedIndex);
+          if (this.canAttack(selectedChar, index)) {
+            this.clearHighlights();
+            this.attack(index, selectedChar, found);
+          } else {
+            // ОШИБКА: Слишком далеко для атаки
+            this.gamePlay.showError('Слишком далеко для атаки!');
+          }
+        } else {
+          // ОШИБКА: Попытка атаковать без выбранного героя
+          this.gamePlay.showError('Сначала выберите своего персонажа!');
+        }
+      }
+    } else {
+      // КЛИК ПО ПУСТОЙ КЛЕТКЕ
+      if (this.selectedIndex !== null) {
+        const selectedChar = this.positions.find(item => item.position === this.selectedIndex);
+        if (this.canMove(selectedChar, index)) {
+          this.gamePlay.deselectCell(this.selectedIndex);
+          this.clearHighlights();
+
+          selectedChar.position = index;
+          this.gamePlay.redrawPositions(this.positions);
+          this.selectedIndex = null;
+          this.gameState.turn = 'computer';
+          this.enemyAction();
+        } else {
+          // ОШИБКА: Слишком далеко для хода (ДОБАВЛЕНО)
+          this.gamePlay.showError('Слишком далеко для хода!');
+        }
+      } else {
+        // ОШИБКА: Клик в пустоту без персонажа (ДОБАВЛЕНО, если хотите реакцию)
+        // this.gamePlay.showError('Выберите персонажа для хода'); // Раскомментируйте, если нужно
+      }
+    }
+  }
+
+  onCellEnter(index) {
+    const found = this.positions.find(item => item.position === index);
+    if (found) {
+      const message = getCharacterInfo(found.character);
+      this.gamePlay.showCellTooltip(message, index);
+    }
+
+    // Курсоры оставляем, но выделение (selectCell) в Enter убираем,
+    // чтобы не портить "Ореол", который мы нарисовали в onCellClick
+    if (this.selectedIndex !== null) {
+      const selectedChar = this.positions.find(i => i.position === this.selectedIndex);
+      if (index === this.selectedIndex) return;
+
+      if (found) {
+        if (['bowman', 'swordsman', 'magician'].includes(found.character.type)) {
+          this.gamePlay.setCursor(cursors.pointer);
+        } else {
+          if (this.canAttack(selectedChar, index)) {
+            this.gamePlay.setCursor(cursors.crosshair);
+            // Убрали selectCell('red') отсюда, так как оно уже есть в ореоле
+            // Но курсор прицела оставляем
+          } else {
+            this.gamePlay.setCursor(cursors.notallowed);
+          }
+        }
+      } else {
+        if (this.canMove(selectedChar, index)) {
+          this.gamePlay.setCursor(cursors.pointer);
+          // Убрали selectCell('green') отсюда, оно есть в ореоле
+        } else {
+          this.gamePlay.setCursor(cursors.notallowed);
+        }
+      }
+    }
+  }
+
+  onCellLeave(index) {
+    this.gamePlay.hideCellTooltip(index);
+    this.gamePlay.setCursor(cursors.auto);
+    // Убираем логику deselectCell отсюда, так как очисткой теперь управляет clearHighlights
+  }
+
+  onSaveGameClick() {
+    const state = {
+      level: this.level,
+      turn: this.gameState.turn,
+      score: this.score,
+      maxScore: this.maxScore, // Сохраняем и рекорд
+      playerTeam: this.playerTeam,
+      enemyTeam: this.enemyTeam,
+      positions: this.positions
+    };
+    this.stateService.save(state);
+    this.gamePlay.showMessage('Игра сохранена!');
+  }
+
+  onLoadGameClick() {
+    try {
+      const state = this.stateService.load();
+      if (!state) return;
+
+      this.level = state.level;
+      this.score = state.score;
+      this.maxScore = state.maxScore || 0; // Загружаем рекорд
+      this.gameState.turn = state.turn;
+      this.playerTeam = state.playerTeam;
+      this.enemyTeam = state.enemyTeam;
+      this.positions = state.positions;
+      this.highlightedCells = [];
+
+      const theme = this.themes[(this.level - 1) % 4];
+      this.gamePlay.drawUi(theme);
+      this.gamePlay.redrawPositions(this.positions);
+
+      this.gamePlay.showMessage('Игра загружена!');
+    } catch (e) {
+      this.gamePlay.showError('Не удалось загрузить игру');
+    }
+  }
+
   getStartPosition(count, side) {
     const boardSize = this.gamePlay.boardSize;
     const possiblePositions = [];
@@ -227,76 +432,6 @@ export default class GameController {
       possiblePositions.splice(randomIndex, 1);
     }
     return positions;
-  }
-
-  onCellClick(index) {
-    if (this.gameState.turn === 'computer') return;
-    const found = this.positions.find(item => item.position === index);
-    if (found) {
-      if (['bowman', 'swordsman', 'magician'].includes(found.character.type)) {
-        if (this.selectedIndex !== null) this.gamePlay.deselectCell(this.selectedIndex);
-        this.gamePlay.selectCell(index);
-        this.selectedIndex = index;
-      } else {
-        if (this.selectedIndex !== null) {
-          const selectedChar = this.positions.find(item => item.position === this.selectedIndex);
-          if (this.canAttack(selectedChar, index)) {
-            this.attack(index, selectedChar, found);
-          } else {
-            this.gamePlay.showError('Слишком далеко для атаки!');
-          }
-        }
-      }
-    } else {
-      if (this.selectedIndex !== null) {
-        const selectedChar = this.positions.find(item => item.position === this.selectedIndex);
-        if (this.canMove(selectedChar, index)) {
-          this.gamePlay.deselectCell(this.selectedIndex);
-          selectedChar.position = index;
-          this.gamePlay.redrawPositions(this.positions);
-          this.selectedIndex = null;
-          this.gameState.turn = 'computer';
-          this.enemyAction();
-        }
-      }
-    }
-  }
-
-  onCellEnter(index) {
-    const found = this.positions.find(item => item.position === index);
-    if (found) {
-      const message = getCharacterInfo(found.character);
-      this.gamePlay.showCellTooltip(message, index);
-    }
-    if (this.selectedIndex !== null) {
-      const selectedChar = this.positions.find(i => i.position === this.selectedIndex);
-      if (index === this.selectedIndex) return;
-      if (found) {
-        if (['bowman', 'swordsman', 'magician'].includes(found.character.type)) {
-          this.gamePlay.setCursor(cursors.pointer);
-        } else {
-          if (this.canAttack(selectedChar, index)) {
-            this.gamePlay.setCursor(cursors.crosshair);
-            this.gamePlay.selectCell(index, 'red');
-          } else {
-            this.gamePlay.setCursor(cursors.notallowed);
-          }
-        }
-      } else {
-        if (this.canMove(selectedChar, index)) {
-          this.gamePlay.setCursor(cursors.pointer);
-          this.gamePlay.selectCell(index, 'green');
-        } else {
-          this.gamePlay.setCursor(cursors.notallowed);
-        }
-      }
-    }
-  }
-
-  onCellLeave(index) {
-    this.gamePlay.hideCellTooltip(index);
-    this.gamePlay.setCursor(cursors.auto);
-    if (this.selectedIndex !== index) this.gamePlay.deselectCell(index);
   }
 
   canMove(positionedChar, targetIndex) {
@@ -332,51 +467,11 @@ export default class GameController {
     return ranges[type][action];
   }
 
-  onSaveGameClick() {
-    const state = {
-      level: this.level,
-      turn: this.gameState.turn,
-      score: this.score,
-      playerTeam: this.playerTeam, // Сохраняем команду игрока
-      enemyTeam: this.enemyTeam,   // Сохраняем команду врага
-      positions: this.positions    // Сохраняем текущие позиции
-    };
-
-    this.stateService.save(state);
-    this.gamePlay.showMessage('Игра сохранена!');
-  }
-
-  onLoadGameClick() {
-    try {
-      const state = this.stateService.load();
-      if (!state) return;
-
-      this.level = state.level;
-      this.score = state.score;
-      this.gameState.turn = state.turn;
-
-      this.playerTeam = state.playerTeam;
-      this.enemyTeam = state.enemyTeam;
-      this.positions = state.positions;
-
-      // Отрисовываем то, что загрузили
-      const theme = this.themes[(this.level - 1) % 4];
-      this.gamePlay.drawUi(theme);
-      this.gamePlay.redrawPositions(this.positions);
-
-      this.gamePlay.showMessage('Игра загружена!');
-    } catch (e) {
-      this.gamePlay.showError('Не удалось загрузить игру');
-    }
-  }
-
   indexToCoords(index) {
     const boardSize = this.gamePlay.boardSize;
     return {
       row: Math.floor(index / boardSize),
       col: index % boardSize,
     };
-
-
   }
 }
